@@ -1,0 +1,17 @@
+#goal definition
+int32 queried_loops
+---
+#result definition
+int32 result
+int32 Success = 1
+int32 GoalWrong = 0
+
+int32 executed_loops
+float64[] final_location
+---
+#feedback
+float64[] current_location
+int32 current_loop
+string status
+string Stop = stop
+string Move = move
