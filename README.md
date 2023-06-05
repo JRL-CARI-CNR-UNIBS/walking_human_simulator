@@ -1,5 +1,6 @@
 # walking_human_simulator
-Action server to simulate walking human for HRC settings
+Action server to simulate walking human for HRC settings.
+
 Configuration:
 ```yaml
 base_frame: "world" # define the reference frame for the positions
