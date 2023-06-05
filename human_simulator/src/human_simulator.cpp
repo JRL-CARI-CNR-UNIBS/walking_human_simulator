@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (c) 2023, Cesare Tonola, c.tonola001@unibs.it
 All rights reserved.
 
@@ -58,7 +58,7 @@ protected:
   human_simulator::HumanSimulatorResult result_;
   human_simulator::HumanSimulatorFeedback feedback_;
 
-  double noise_x_, noise_y_, noise_z_;
+  double noise_x_, noise_y_, noise_z_, rate_;
   std::vector<double> x_, y_, z_, pauses_duration_, motions_duration_;
 
 public:
@@ -80,6 +80,20 @@ public:
     {
       base_frame_ = "world";
       ROS_ERROR_STREAM("default base_frame "<<base_frame_);
+    }
+
+    if(not nh_.getParam("rate",rate_))
+    {
+      rate_ = 30.0;
+      ROS_ERROR_STREAM("default rate_ "<<rate_);
+    }
+    else
+    {
+      if(rate_<=0.0)
+      {
+        rate_ = 30.0;
+        ROS_ERROR_STREAM("default rate_ "<<rate_);
+      }
     }
 
     if(not nh_.getParam("x",x_))
@@ -266,7 +280,7 @@ public:
     ROS_INFO("%s: Goal accepted", action_name_.c_str());
 
     double t = 0.0;
-    double dt = 0.01;
+    double dt = 1.0/(double)rate_;
     double pause_duration = 0.0;
     double motion_duration = 0.0;
 
@@ -276,7 +290,7 @@ public:
     std::uniform_real_distribution<double> noise_y(-noise_y_,noise_y_);
     std::uniform_real_distribution<double> noise_z(-noise_z_,noise_z_);
 
-    ros::WallRate lp(1.0/dt);
+    ros::WallRate lp(rate_);
     Eigen::Vector3d current_location, next_location, velocity;
     std::vector<moveit_msgs::CollisionObject> collision_objects;
     moveit_msgs::CollisionObject collision_object = collision_object_;
@@ -295,8 +309,12 @@ public:
 
     bool success = true;
 
+    ros::WallTime tic, toc;
+
     while(loops<max_loops)
     {
+      tic =ros::WallTime::now();
+
       if (as_.isPreemptRequested() || not ros::ok())
       {
         ROS_INFO("%s: Preempted", action_name_.c_str());
@@ -336,19 +354,12 @@ public:
         collision_objects.clear();
 
         if(loops == 0)
-        {
           collision_object.operation = moveit_msgs::CollisionObject::ADD;
-
-          collision_objects.push_back(collision_object);
-          planning_scene_interface_.addCollisionObjects(collision_objects);
-        }
         else
-        {
           collision_object.operation = moveit_msgs::CollisionObject::MOVE;
 
-          collision_objects.push_back(collision_object);
-          planning_scene_interface_.applyCollisionObjects(collision_objects);
-        }
+        collision_objects.push_back(collision_object);
+        planning_scene_interface_.addCollisionObjects(collision_objects);
 
         next_location<<*it_x,*it_y,*it_z;
         it_x++; it_y++; it_z++;
@@ -365,78 +376,82 @@ public:
         status = stop;
         new_loop = false;
       }
-
-      if(status == stop)
+      else
       {
-        if(t>pause_duration)
+        if(status == stop)
         {
-          if(it_pauses == pauses_duration_.end())
+          if(t>pause_duration)
           {
-            loops++;
-            new_loop = true;
+            if(it_pauses == pauses_duration_.end())
+            {
+              loops++;
+              new_loop = true;
+            }
+            else
+            {
+              pause_duration = *it_pauses;
+              it_pauses++;
+            }
+
+            if(not motions_duration_.empty())
+              status = move;
+
+            t = 0.0;
+            continue;
+          }
+          else //add noise to current position during pause
+          {
+            collision_object.pose.position.x = current_location[0]+noise_x(gen);
+            collision_object.pose.position.y = current_location[1]+noise_y(gen);
+            collision_object.pose.position.z = current_location[2]+noise_z(gen);
+
+            collision_object.operation = moveit_msgs::CollisionObject::MOVE;
+
+            collision_object.primitives     .clear(); //remove the warnings
+            collision_object.primitive_poses.clear(); //remove the warnings
+
+            collision_objects.clear();
+            collision_objects.push_back(collision_object);
+            planning_scene_interface_.applyCollisionObjects(collision_objects);
+          }
+        }
+
+        if(status == move)
+        {
+          if(t>motion_duration)
+          {
+            if(it_motions < motions_duration_.end())
+            {
+              motion_duration = *it_motions;
+              it_motions++;
+
+              next_location<<*it_x,*it_y,*it_z;
+              it_x++; it_y++; it_z++;
+
+              velocity = (next_location-current_location)/(motion_duration);
+            }
+
+            status = stop;
+            t = 0.0;
+            continue;
           }
           else
           {
-            pause_duration = *it_pauses;
-            it_pauses++;
+            current_location = current_location + dt*velocity;
+
+            collision_object.pose.position.x = current_location[0];
+            collision_object.pose.position.y = current_location[1];
+            collision_object.pose.position.z = current_location[2];
+
+            collision_object.operation = moveit_msgs::CollisionObject::MOVE;
+
+            collision_object.primitives     .clear(); //remove the warnings
+            collision_object.primitive_poses.clear(); //remove the warnings
+
+            collision_objects.clear();
+            collision_objects.push_back(collision_object);
+            planning_scene_interface_.applyCollisionObjects(collision_objects);
           }
-
-          status = move;
-          t = 0.0;
-          continue;
-        }
-        else //add noise to current position during pause
-        {
-          collision_object.pose.position.x = current_location[0]+noise_x(gen);
-          collision_object.pose.position.y = current_location[1]+noise_y(gen);
-          collision_object.pose.position.z = current_location[2]+noise_z(gen);
-
-          collision_object.operation = moveit_msgs::CollisionObject::MOVE;
-
-          collision_object.primitives     .clear(); //remove the warnings
-          collision_object.primitive_poses.clear(); //remove the warnings
-
-          collision_objects.clear();
-          collision_objects.push_back(collision_object);
-          planning_scene_interface_.applyCollisionObjects(collision_objects);
-        }
-      }
-
-      if(status == move)
-      {
-        if(t>motion_duration)
-        {
-          if(it_motions < motions_duration_.end())
-          {
-            motion_duration = *it_motions;
-            it_motions++;
-
-            next_location<<*it_x,*it_y,*it_z;
-            it_x++; it_y++; it_z++;
-
-            velocity = (next_location-current_location)/(motion_duration);
-          }
-
-          status = stop;
-          t = 0.0;
-          continue;
-        }
-        else
-        {
-          current_location = current_location + dt*velocity;
-
-          collision_object.pose.position.x = current_location[0];
-          collision_object.pose.position.y = current_location[1];
-          collision_object.pose.position.z = current_location[2];
-
-          collision_object.operation = moveit_msgs::CollisionObject::MOVE;
-
-          collision_object.primitives     .clear(); //remove the warnings
-          collision_object.primitive_poses.clear(); //remove the warnings
-
-          collision_objects.clear();
-          collision_objects.push_back(collision_object);
-          planning_scene_interface_.applyCollisionObjects(collision_objects);
         }
       }
 
@@ -481,6 +496,10 @@ public:
       pose_array.poses.push_back(pose);
 
       poses_pub_.publish(pose_array);
+
+      toc =ros::WallTime::now();
+      if((toc-tic).toSec()>2.0*dt)
+        ROS_WARN_STREAM("slow loop, duration -> "<<(toc-tic).toSec()<<" seconds");
 
       lp.sleep();
     }
