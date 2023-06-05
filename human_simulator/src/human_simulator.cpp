@@ -364,13 +364,15 @@ public:
         next_location<<*it_x,*it_y,*it_z;
         it_x++; it_y++; it_z++;
 
-        pause_duration  = *it_pauses ;
-        motion_duration = *it_motions;
-
-        velocity = (next_location-current_location)/(motion_duration);
-
+        pause_duration  = *it_pauses;
         it_pauses ++;
-        it_motions++;
+
+        if(not motions_duration_.empty())
+        {
+          motion_duration = *it_motions;
+          velocity = (next_location-current_location)/(motion_duration);
+          it_motions++;
+        }
 
         t = 0.0;
         status = stop;
