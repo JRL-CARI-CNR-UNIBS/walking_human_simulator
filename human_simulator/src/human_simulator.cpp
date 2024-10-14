@@ -43,7 +43,8 @@ protected:
   actionlib::SimpleActionServer<human_simulator::HumanSimulatorAction> as_;
 
   moveit_msgs::CollisionObject collision_object_;
-  moveit::planning_interface::PlanningSceneInterface planning_scene_interface_ = moveit::planning_interface::PlanningSceneInterface("",true,true);
+  moveit::planning_interface::PlanningSceneInterface planning_scene_interface_ =
+      moveit::planning_interface::PlanningSceneInterface("",true,true);
 
   std::string base_frame_;
 
